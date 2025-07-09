@@ -1,0 +1,600 @@
+<script type="text/javascript">
+        var gk_isXlsx = false;
+        var gk_xlsxFileLookup = {};
+        var gk_fileData = {};
+        function filledCell(cell) {
+          return cell !== '' && cell != null;
+        }
+        function loadFileData(filename) {
+        if (gk_isXlsx && gk_xlsxFileLookup[filename]) {
+            try {
+                var workbook = XLSX.read(gk_fileData[filename], { type: 'base64' });
+                var firstSheetName = workbook.SheetNames[0];
+                var worksheet = workbook.Sheets[firstSheetName];
+
+                // Convert sheet to JSON to filter blank rows
+                var jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, blankrows: false, defval: '' });
+                // Filter out blank rows (rows where all cells are empty, null, or undefined)
+                var filteredData = jsonData.filter(row => row.some(filledCell));
+
+                // Heuristic to find the header row by ignoring rows with fewer filled cells than the next row
+                var headerRowIndex = filteredData.findIndex((row, index) =>
+                  row.filter(filledCell).length >= filteredData[index + 1]?.filter(filledCell).length
+                );
+                // Fallback
+                if (headerRowIndex === -1 || headerRowIndex > 25) {
+                  headerRowIndex = 0;
+                }
+
+                // Convert filtered JSON back to CSV
+                var csv = XLSX.utils.aoa_to_sheet(filteredData.slice(headerRowIndex)); // Create a new sheet from filtered array of arrays
+                csv = XLSX.utils.sheet_to_csv(csv, { header: 1 });
+                return csv;
+            } catch (e) {
+                console.error(e);
+                return "";
+            }
+        }
+        return gk_fileData[filename] || "";
+        }
+        </script><!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>D&D Map Editor</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.min.js"></script>
+  <style>
+    body { margin: 0; font-family: Arial, sans-serif; display: flex; }
+    canvas { border: 1px solid black; }
+    #controls { padding: 10px; width: 200px; background: #f0f0f0; }
+    button { margin: 5px; padding: 8px; width: 100%; cursor: pointer; }
+    button.active { background: #4CAF50; color: white; }
+    #dimensionInput { margin: 10px 0; }
+    #dimensionInput input { margin: 5px; padding: 5px; width: 80px; }
+    #renameInput { margin: 10px 0; display: none; }
+    #renameInput input { margin: 5px; padding: 5px; width: 80px; }
+    #terrainInput { margin: 10px 0; display: none; }
+    #terrainInput select { margin: 5px; padding: 5px; width: 100%; }
+    #enemyInput { margin: 10px 0; display: none; }
+    #enemyInput select { margin: 5px; padding: 5px; width: 100%; }
+    #sizeInput { margin: 10px 0; display: none; }
+    #sizeInput input { margin: 5px; padding: 5px; width: 80px; }
+    #loadInput { margin: 10px 0; }
+    #loadInput input { margin: 5px; padding: 5px; width: 100%; }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <div id="dimensionInput">
+      <label>Width (10-30):</label><input type="number" id="mapWidth" min="10" max="30" value="20"><br>
+      <label>Height (10-20):</label><input type="number" id="mapHeight" min="10" max="20" value="12"><br>
+      <button onclick="changeMapSize()">Set/Change Map Size</button>
+    </div>
+    <div id="renameInput">
+      <label>New Name:</label><input type="text" id="renameField" value=""><br>
+      <button onclick="applyRename()">Rename</button>
+    </div>
+    <div id="terrainInput">
+      <label>Terrain Type:</label>
+      <select id="terrainType">
+        <option value="road">Road</option>
+        <option value="tree">Tree</option>
+        <option value="dirt">Dirt</option>
+        <option value="sand">Sand</option>
+        <option value="grass">Grass</option>
+        <option value="building">Building</option>
+        <option value="debris">Debris</option>
+        <option value="rock">Rock</option>
+        <option value="snow">Snow</option>
+        <option value="bramble">Bramble</option>
+        <option value="water">Water</option>
+        <option value="mud">Mud</option>
+        <option value="lava">Lava</option>
+      </select>
+    </div>
+    <div id="enemyInput">
+      <label>Enemy Type:</label>
+      <select id="enemyType">
+        <option value="enemy">Enemy</option>
+        <option value="goblin">Goblin</option>
+        <option value="orc">Orc</option>
+        <option value="troll">Troll</option>
+        <option value="gnoll">Gnoll</option>
+        <option value="wolf">Wolf</option>
+        <option value="golem">Golem</option>
+        <option value="plant_monster">Plant Monster</option>
+        <option value="bear">Bear</option>
+        <option value="small_dragon">Small Dragon</option>
+        <option value="big_dragon">Big Dragon</option>
+      </select>
+    </div>
+    <div id="sizeInput">
+      <label>Width (1-3):</label><input type="number" id="sizeWidth" min="1" max="3" value="1"><br>
+      <label>Height (1-3):</label><input type="number" id="sizeHeight" min="1" max="3" value="1"><br>
+      <button onclick="applySize()">Apply Size</button>
+    </div>
+    <div id="loadInput">
+      <label>Load Map:</label><input type="file" id="loadMapFile" accept=".json"><br>
+      <button onclick="loadMap()">Load Map</button>
+    </div>
+    <button onclick="setMode('character')" id="addCharacterBtn">Add Character</button>
+    <button onclick="setMode('terrain')" id="addTerrainBtn">Add Terrain</button>
+    <button onclick="setMode('enemy')" id="addEnemyBtn">Add Enemy</button>
+    <button onclick="setMode('move')" id="moveItemBtn">Move Item</button>
+    <button onclick="setMode('delete')" id="deleteItemBtn">Delete Item</button>
+    <button onclick="setMode('rename')" id="renameItemBtn">Rename Item</button>
+    <button onclick="setMode('change-size')" id="changeSizeBtn">Change Size</button>
+    <button onclick="clearMap()" id="clearMapBtn">Clear Map</button>
+    <button onclick="saveMap()" id="saveMapBtn">Save Map</button>
+  </div>
+  <script>
+    let gridSize = 50;
+    let cols = 20;
+    let rows = 12;
+    let items = [];
+    let mode = 'character';
+    let selectedItem = null;
+    let isInitialized = false;
+    let p5Instance;
+
+    const sketch = (p) => {
+      p.setup = function() {
+        console.log("p5.js setup running");
+        p.createCanvas(cols * gridSize, rows * gridSize);
+        isInitialized = true;
+        document.getElementById('addCharacterBtn').style.display = 'block';
+        document.getElementById('addTerrainBtn').style.display = 'block';
+        document.getElementById('addEnemyBtn').style.display = 'block';
+        document.getElementById('moveItemBtn').style.display = 'block';
+        document.getElementById('deleteItemBtn').style.display = 'block';
+        document.getElementById('renameItemBtn').style.display = 'block';
+        document.getElementById('changeSizeBtn').style.display = 'block';
+        document.getElementById('clearMapBtn').style.display = 'block';
+        document.getElementById('saveMapBtn').style.display = 'block';
+        document.getElementById('loadInput').style.display = 'block';
+      };
+
+      p.draw = function() {
+        if (!isInitialized) return;
+        p.background(255);
+        p.stroke(200);
+        for (let x = 0; x <= p.width; x += gridSize) {
+          p.line(x, 0, x, p.height);
+        }
+        for (let y = 0; y <= p.height; y += gridSize) {
+          p.line(0, y, p.width, y);
+        }
+        items.forEach(item => {
+          if (item.type === 'terrain') {
+            drawTerrain(item.x, item.y, item.pattern, p);
+          }
+        });
+        items.forEach(item => {
+          if (item.type === 'character') {
+            let onTerrain = items.some(i => i.type === 'terrain' && i.x === item.x && i.y === item.y);
+            drawStickFigure(item.x, item.y, onTerrain, item.size || {width: 1, height: 1}, p);
+            p.fill(0);
+            p.textAlign(p.CENTER, p.BOTTOM);
+            p.text(item.name || 'Char', item.x * gridSize + gridSize * (item.size?.width || 1) / 2, item.y * gridSize - 5);
+          } else if (item.type === 'enemy') {
+            drawEnemy(item.x, item.y, item.enemyType || 'enemy', item.size || {width: 1, height: 1}, p);
+            p.fill(0);
+            p.textAlign(p.CENTER, p.BOTTOM);
+            p.text(item.name || 'Enemy', item.x * gridSize + gridSize * (item.size?.width || 1) / 2, item.y * gridSize - 5);
+          }
+        });
+      };
+
+      p.mousePressed = function() {
+        if (!isInitialized) return;
+        let gridX = p.floor(p.mouseX / gridSize);
+        let gridY = p.floor(p.mouseY / gridSize);
+        if (gridX >= 0 && gridX < cols && gridY >= 0 && gridY < rows) {
+          if (mode === 'move') {
+            selectedItem = items.find(item => 
+              (item.type === 'character' || item.type === 'enemy') && 
+              gridX >= item.x && gridX < item.x + (item.size?.width || 1) &&
+              gridY >= item.y && gridY < item.y + (item.size?.height || 1)
+            );
+          } else if (mode === 'delete') {
+            let index = items.findIndex(item => 
+              (item.type === 'character' || item.type === 'enemy') && 
+              gridX >= item.x && gridX < item.x + (item.size?.width || 1) &&
+              gridY >= item.y && gridY < item.y + (item.size?.height || 1)
+            );
+            if (index !== -1) {
+              items.splice(index, 1);
+            }
+          } else if (mode === 'rename') {
+            selectedItem = items.find(item => 
+              (item.type === 'character' || item.type === 'enemy') && 
+              gridX >= item.x && gridX < item.x + (item.size?.width || 1) &&
+              gridY >= item.y && gridY < item.y + (item.size?.height || 1)
+            );
+            if (selectedItem) {
+              document.getElementById('renameInput').style.display = 'block';
+              document.getElementById('renameField').value = selectedItem.name || (selectedItem.type === 'character' ? 'Character' : 'Enemy');
+              document.getElementById('renameField').focus();
+            }
+          } else if (mode === 'change-size') {
+            selectedItem = items.find(item => 
+              (item.type === 'character' || item.type === 'enemy') && 
+              gridX >= item.x && gridX < item.x + (item.size?.width || 1) &&
+              gridY >= item.y && gridY < item.y + (item.size?.height || 1)
+            );
+            if (selectedItem) {
+              document.getElementById('sizeInput').style.display = 'block';
+              document.getElementById('sizeWidth').value = selectedItem.size?.width || 1;
+              document.getElementById('sizeHeight').value = selectedItem.size?.height || 1;
+              document.getElementById('sizeWidth').focus();
+            }
+          } else if (mode === 'character') {
+            if (!items.some(item => 
+              (item.type === 'character' || item.type === 'enemy') &&
+              gridX >= item.x && gridX < item.x + (item.size?.width || 1) &&
+              gridY >= item.y && gridY < item.y + (item.size?.height || 1)
+            )) {
+              let name = prompt('Enter character name:', 'Character');
+              items.push({ type: 'character', x: gridX, y: gridY, name: name || 'Char', size: {width: 1, height: 1} });
+            }
+          } else if (mode === 'enemy') {
+            let enemyType = document.getElementById('enemyType').value;
+            let size = enemyType === 'big_dragon' ? {width: 2, height: 2} : {width: 1, height: 1};
+            if (!items.some(item => 
+              (item.type === 'character' || item.type === 'enemy') &&
+              gridX >= item.x && gridX < item.x + (item.size?.width || 1) &&
+              gridY >= item.y && gridY < item.y + (item.size?.height || 1)
+            )) {
+              let name = prompt('Enter enemy name:', 'Enemy');
+              items.push({ type: 'enemy', x: gridX, y: gridY, name: name || 'Enemy', enemyType, size });
+            }
+          } else if (mode === 'terrain') {
+            if (!items.some(item => 
+              (item.type === 'character' || item.type === 'enemy') &&
+              gridX >= item.x && gridX < item.x + (item.size?.width || 1) &&
+              gridY >= item.y && gridY < item.y + (item.size?.height || 1)
+            )) {
+              items = items.filter(item => !(item.type === 'terrain' && item.x === gridX && item.y === gridY));
+              let terrainType = document.getElementById('terrainType').value;
+              let seed = gridX + gridY * cols;
+              let pattern = generateTerrainPattern(terrainType, seed);
+              items.push({ type: 'terrain', x: gridX, y: gridY, terrainType, pattern });
+            }
+          }
+        }
+      };
+
+      p.mouseReleased = function() {
+        if (!isInitialized || !selectedItem || mode !== 'move') return;
+        let gridX = p.floor(p.mouseX / gridSize);
+        let gridY = p.floor(p.mouseY / gridSize);
+        if (gridX >= 0 && gridX < cols - (selectedItem.size?.width - 1 || 0) && 
+            gridY >= 0 && gridY < rows - (selectedItem.size?.height - 1 || 0)) {
+          if (!items.some(item => 
+            item !== selectedItem &&
+            (item.type === 'character' || item.type === 'enemy') &&
+            gridX < item.x + (item.size?.width || 1) &&
+            gridX + (selectedItem.size?.width || 1) > item.x &&
+            gridY < item.y + (item.size?.height || 1) &&
+            gridY + (selectedItem.size?.height || 1) > item.y
+          )) {
+            selectedItem.x = gridX;
+            selectedItem.y = gridY;
+          }
+        }
+        selectedItem = null;
+      };
+
+      p.resizeMapCanvas = function(newCols, newRows) {
+        console.log(`Resizing canvas to ${newCols}x${newRows}`);
+        cols = newCols;
+        rows = newRows;
+        p.resizeCanvas(cols * gridSize, rows * gridSize);
+      };
+    };
+
+    try {
+      p5Instance = new p5(sketch);
+      console.log("p5.js instance created");
+    } catch (error) {
+      console.error("Error initializing p5.js:", error);
+    }
+
+    function changeMapSize() {
+      let newCols = parseInt(document.getElementById('mapWidth').value) || 20;
+      let newRows = parseInt(document.getElementById('mapHeight').value) || 12;
+      newCols = Math.max(10, Math.min(30, newCols));
+      newRows = Math.max(10, Math.min(20, newRows));
+      items = [];
+      isInitialized = true;
+      document.getElementById('addCharacterBtn').style.display = 'block';
+      document.getElementById('addTerrainBtn').style.display = 'block';
+      document.getElementById('addEnemyBtn').style.display = 'block';
+      document.getElementById('moveItemBtn').style.display = 'block';
+      document.getElementById('deleteItemBtn').style.display = 'block';
+      document.getElementById('renameItemBtn').style.display = 'block';
+      document.getElementById('changeSizeBtn').style.display = 'block';
+      document.getElementById('clearMapBtn').style.display = 'block';
+      document.getElementById('saveMapBtn').style.display = 'block';
+      document.getElementById('loadInput').style.display = 'block';
+      p5Instance.resizeMapCanvas(newCols, newRows);
+    }
+
+    function applyRename() {
+      if (selectedItem && mode === 'rename') {
+        let newName = document.getElementById('renameField').value || (selectedItem.type === 'character' ? 'Char' : 'Enemy');
+        selectedItem.name = newName;
+        document.getElementById('renameInput').style.display = 'none';
+        selectedItem = null;
+        setMode('character');
+      }
+    }
+
+    function applySize() {
+      if (selectedItem && mode === 'change-size') {
+        let newWidth = parseInt(document.getElementById('sizeWidth').value) || 1;
+        let newHeight = parseInt(document.getElementById('sizeHeight').value) || 1;
+        newWidth = Math.max(1, Math.min(3, newWidth));
+        newHeight = Math.max(1, Math.min(3, newHeight));
+        if (selectedItem.x + newWidth <= cols && selectedItem.y + newHeight <= rows) {
+          let conflict = items.some(item => 
+            item !== selectedItem &&
+            (item.type === 'character' || item.type === 'enemy') &&
+            selectedItem.x < item.x + (item.size?.width || 1) &&
+            selectedItem.x + newWidth > item.x &&
+            selectedItem.y < item.y + (item.size?.height || 1) &&
+            selectedItem.y + newHeight > item.y
+          );
+          if (!conflict) {
+            selectedItem.size = {width: newWidth, height: newHeight};
+          } else {
+            alert('Size change blocked by another character or enemy.');
+          }
+        } else {
+          alert('Size change exceeds map boundaries.');
+        }
+        document.getElementById('sizeInput').style.display = 'none';
+        selectedItem = null;
+        setMode('character');
+      }
+    }
+
+    function generateTerrainPattern(terrainType, seed) {
+      p5Instance.randomSeed(seed);
+      let pattern = [];
+      let subGridSize = gridSize / 5;
+      for (let i = 0; i < 5; i++) {
+        for (let j = 0; j < 5; j++) {
+          let variation = p5Instance.random(-20, 20);
+          let color;
+          if (terrainType === 'road') {
+            color = [100 + variation, 100 + variation, 100 + variation];
+          } else if (terrainType === 'tree') {
+            color = [0, 100 + variation, 0];
+          } else if (terrainType === 'dirt') {
+            color = [139 + variation, 69 + variation, 19];
+          } else if (terrainType === 'sand') {
+            color = [194 + variation, 178 + variation, 128];
+          } else if (terrainType === 'grass') {
+            color = [34 + variation, 139 + variation, 34];
+          } else if (terrainType === 'building') {
+            color = [169 + variation, 169 + variation, 169];
+          } else if (terrainType === 'debris') {
+            color = [105 + variation, 105 + variation, 105];
+          } else if (terrainType === 'rock') {
+            color = [112 + variation, 128 + variation, 144];
+          } else if (terrainType === 'snow') {
+            color = [240 + variation, 240 + variation, 255];
+          } else if (terrainType === 'bramble') {
+            color = [p5Instance.random(20, 40) + variation, 80 + variation, p5Instance.random(20, 40)];
+          } else if (terrainType === 'water') {
+            color = [0, 105 + variation, 148 + variation];
+          } else if (terrainType === 'mud') {
+            color = [92 + variation, 64 + variation, 51];
+          } else if (terrainType === 'lava') {
+            color = [200 + variation, 50 + variation, 50];
+          }
+          pattern.push({ x: i * subGridSize, y: j * subGridSize, color });
+        }
+      }
+      return pattern;
+    }
+
+    function drawTerrain(x, y, terrainPattern, p) {
+      let subGridSize = gridSize / 5;
+      p.noStroke();
+      terrainPattern.forEach(pixel => {
+        p.fill(pixel.color[0], pixel.color[1], pixel.color[2]);
+        p.rect(x * gridSize + pixel.x, y * gridSize + pixel.y, subGridSize, subGridSize);
+      });
+    }
+
+    function drawStickFigure(x, y, onTerrain, size, p) {
+      let centerX = x * gridSize + gridSize * size.width / 2;
+      let centerY = y * gridSize + gridSize * size.height / 2;
+      let figureWidth = gridSize * size.width * 0.4;
+      let figureHeight = gridSize * size.height * 0.8;
+      p.fill(onTerrain ? 255 : 0);
+      p.stroke(onTerrain ? 255 : 0);
+      p.strokeWeight(2);
+      p.ellipse(centerX, centerY - figureHeight / 2, figureWidth / 2);
+      p.line(centerX, centerY - figureHeight / 3, centerX, centerY + figureHeight / 6);
+      p.line(centerX - figureWidth / 2, centerY - figureHeight / 6, centerX + figureWidth / 2, centerY - figureHeight / 6);
+      p.line(centerX, centerY + figureHeight / 6, centerX - figureWidth / 2, centerY + figureHeight / 2);
+      p.line(centerX, centerY + figureHeight / 6, centerX + figureWidth / 2, centerY + figureHeight / 2);
+      p.noStroke();
+    }
+
+    function drawEnemy(x, y, enemyType, size, p) {
+      let centerX = x * gridSize + gridSize * size.width / 2;
+      let centerY = y * gridSize + gridSize * size.height / 2;
+      let baseSize = gridSize * Math.max(size.width, size.height) * 0.8;
+      p.noStroke();
+      if (enemyType === 'enemy') {
+        p.fill(255, 0, 0);
+        p.triangle(
+          centerX, centerY - baseSize / 2,
+          centerX - baseSize / 2, centerY + baseSize / 2,
+          centerX + baseSize / 2, centerY + baseSize / 2
+        );
+      } else if (enemyType === 'goblin') {
+        p.fill(0, 128, 0);
+        p.triangle(
+          centerX, centerY - baseSize / 2,
+          centerX - baseSize / 2, centerY + baseSize / 2,
+          centerX + baseSize / 2, centerY + baseSize / 2
+        );
+      } else if (enemyType === 'orc') {
+        p.fill(139, 69, 19);
+        p.rect(centerX - baseSize / 2, centerY - baseSize / 2, baseSize, baseSize);
+      } else if (enemyType === 'troll') {
+        p.fill(128, 0, 128);
+        p.push();
+        p.translate(centerX, centerY);
+        p.rotate(p.PI / 4);
+        p.rect(-baseSize / 2, -baseSize / 2, baseSize, baseSize);
+        p.pop();
+      } else if (enemyType === 'gnoll') {
+        p.fill(255, 140, 0);
+        p.triangle(
+          centerX, centerY + baseSize / 2,
+          centerX - baseSize / 2, centerY - baseSize / 2,
+          centerX + baseSize / 2, centerY - baseSize / 2
+        );
+      } else if (enemyType === 'wolf') {
+        p.fill(128, 128, 128);
+        p.ellipse(centerX, centerY, baseSize);
+      } else if (enemyType === 'golem') {
+        p.fill(80, 80, 80);
+        p.rect(centerX - baseSize / 2, centerY - baseSize / 2, baseSize, baseSize);
+      } else if (enemyType === 'plant_monster') {
+        p.fill(50, 205, 50);
+        p.beginShape();
+        for (let i = 0; i < 5; i++) {
+          let angle = p.TWO_PI / 5 * i;
+          p.vertex(centerX + baseSize / 2 * p.cos(angle), centerY + baseSize / 2 * p.sin(angle));
+        }
+        p.endShape(p.CLOSE);
+      } else if (enemyType === 'bear') {
+        p.fill(101, 67, 33);
+        p.ellipse(centerX, centerY, baseSize);
+      } else if (enemyType === 'small_dragon') {
+        p.fill(0, 255, 255);
+        p.triangle(
+          centerX, centerY + baseSize / 2,
+          centerX - baseSize / 2, centerY - baseSize / 2,
+          centerX + baseSize / 2, centerY - baseSize / 2
+        );
+      } else if (enemyType === 'big_dragon') {
+        p.fill(200, 0, 0);
+        p.rect(centerX - baseSize / 2, centerY - baseSize / 2, baseSize, baseSize);
+      }
+    }
+
+    function saveMap() {
+      try {
+        if (!items || !Array.isArray(items)) {
+          throw new Error('Invalid items array');
+        }
+        if (!window.Blob || !window.URL || !window.URL.createObjectURL) {
+          throw new Error('Browser does not support Blob or URL APIs');
+        }
+        const saveData = {
+          cols: cols,
+          rows: rows,
+          items: items.map(item => {
+            const { pattern, ...rest } = item;
+            return rest;
+          })
+        };
+        const json = JSON.stringify(saveData, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'map.json';
+        a.style.display = 'none';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+        console.log('Map saved successfully');
+      } catch (error) {
+        console.error('Error saving map:', error);
+        alert('Failed to save map: ' + error.message);
+      }
+    }
+
+    function loadMap() {
+      const fileInput = document.getElementById('loadMapFile');
+      const file = fileInput.files[0];
+      if (!file) {
+        alert('Please select a map file to load.');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = JSON.parse(e.target.result);
+          if (!data.cols || !data.rows || !Array.isArray(data.items)) {
+            alert('Invalid map file format.');
+            return;
+          }
+          let newCols = Math.max(10, Math.min(30, data.cols));
+          let newRows = Math.max(10, Math.min(20, data.rows));
+          document.getElementById('mapWidth').value = newCols;
+          document.getElementById('mapHeight').value = newRows;
+          items = [];
+          data.items.forEach(item => {
+            if (item.type === 'terrain') {
+              let seed = item.x + item.y * cols;
+              let pattern = generateTerrainPattern(item.terrainType, seed);
+              items.push({ type: 'terrain', x: item.x, y: item.y, terrainType: item.terrainType, pattern });
+            } else if (item.type === 'character' || item.type === 'enemy') {
+              items.push({ 
+                type: item.type, 
+                x: item.x, 
+                y: item.y, 
+                name: item.name || (item.type === 'character' ? 'Char' : 'Enemy'),
+                enemyType: item.enemyType || 'enemy',
+                size: item.size || {width: item.enemyType === 'big_dragon' ? 2 : 1, height: item.enemyType === 'big_dragon' ? 2 : 1}
+              });
+            }
+          });
+          p5Instance.resizeMapCanvas(newCols, newRows);
+          setMode('character');
+          fileInput.value = '';
+          console.log('Map loaded successfully');
+        } catch (error) {
+          console.error('Error loading map:', error);
+          alert('Error loading map: ' + error.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function setMode(newMode) {
+      mode = newMode;
+      document.getElementById('renameInput').style.display = 'none';
+      document.getElementById('terrainInput').style.display = newMode === 'terrain' ? 'block' : 'none';
+      document.getElementById('enemyInput').style.display = newMode === 'enemy' ? 'block' : 'none';
+      document.getElementById('sizeInput').style.display = newMode === 'change-size' ? 'block' : 'none';
+      selectedItem = null;
+      document.querySelectorAll('#controls button').forEach(btn => btn.classList.remove('active'));
+      document.querySelector(`#controls button[onclick="setMode('${newMode}')"]`).classList.add('active');
+    }
+
+    function clearMap() {
+      items = [];
+      selectedItem = null;
+      mode = 'character';
+      setMode('character');
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      console.log("DOM loaded, initializing map editor");
+      setMode('character');
+    });
+  </script>
+</body>
+</html>
